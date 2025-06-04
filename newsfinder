@@ -1,0 +1,100 @@
+// ESG Weekly News Collector Web App
+
+import streamlit as st
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
+
+# Define your news sources
+sources = {
+    "CSR@天下": "https://csr.cw.com.tw/",
+    "CSRone": "https://csrone.com/",
+    "ETtoday ESG": "https://esg.ettoday.net/",
+    "The Guardian Environment": "https://www.theguardian.com/uk/environment",
+    "CNN Climate": "https://edition.cnn.com/specials/world/cnn-climate",
+    "BBC Environment": "https://www.bbc.com/news/science_and_environment",
+    "中央社 健康環保": "https://www.cna.com.tw/list/ahel.aspx"
+}
+
+def fetch_html(url):
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return BeautifulSoup(response.text, 'html.parser')
+    except Exception as e:
+        st.warning(f"❌ Failed to fetch {url}: {e}")
+        return None
+
+def parse_generic(soup, base_url, tag_selector, limit=5):
+    articles = []
+    seen = set()
+    for tag in soup.select(tag_selector):
+        title = tag.text.strip()
+        link = tag.get('href')
+        if not title or not link or title in seen:
+            continue
+        seen.add(title)
+        if link.startswith('/'):
+            link = base_url.rstrip('/') + link
+        elif not link.startswith('http'):
+            continue
+        articles.append((title, link))
+        if len(articles) >= limit:
+            break
+    return articles
+
+def get_articles():
+    result = {}
+    for name, url in sources.items():
+        soup = fetch_html(url)
+        if not soup:
+            result[name] = []
+            continue
+
+        if "cw.com.tw" in url:
+            articles = parse_generic(soup, url, 'div.article-content a')
+        elif "ettoday.net" in url:
+            articles = parse_generic(soup, url, 'div.piece h3 a')
+        elif "guardian" in url:
+            articles = parse_generic(soup, url, 'a.u-faux-block-link__overlay')
+        elif "cnn" in url:
+            articles = parse_generic(soup, url, 'h3.cd__headline a')
+        elif "bbc" in url:
+            articles = parse_generic(soup, url, 'a.gs-c-promo-heading')
+        elif "cna.com.tw" in url:
+            articles = parse_generic(soup, url, 'div.listBox a')
+        elif "csrone" in url:
+            articles = parse_generic(soup, url, 'h5.card-title a')
+        else:
+            articles = parse_generic(soup, url, 'a')
+
+        result[name] = articles
+    return result
+
+def format_for_notion(articles_by_source):
+    date_str = datetime.today().strftime('%Y-%m-%d')
+    notion_md = f"## 🌱 ESG Weekly News Digest ({date_str})\n\n"
+
+    for source, articles in articles_by_source.items():
+        notion_md += f"### {source}\n"
+        if not articles:
+            notion_md += "- 無法取得新聞資料\n"
+            continue
+        for title, link in articles:
+            notion_md += f"- [{title}]({link})\n"
+        notion_md += "\n"
+
+    return notion_md
+
+# Streamlit Web UI
+st.title("📬 ESG 每週新聞快報工具")
+
+if st.button("🔍 擷取本週 ESG 新聞"):
+    with st.spinner("擷取中，請稍候..."):
+        news_data = get_articles()
+        notion_output = format_for_notion(news_data)
+        st.success("擷取完成！以下為可複製貼上的 Notion 格式：")
+        st.code(notion_output, language='markdown')
+
+st.markdown("---")
+st.markdown("此工具由 Chris 專為 ESG 專業人士設計，點一下就幫你抓好每週的永續新聞！")
