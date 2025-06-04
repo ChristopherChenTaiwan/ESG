@@ -1,4 +1,4 @@
-// ESG Weekly News Collector Web App
+# ESG Weekly News Collector Web App
 
 import streamlit as st
 import requests
