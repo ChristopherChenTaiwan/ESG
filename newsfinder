@@ -1,10 +1,12 @@
+# ESG Weekly News Collector Web App (Rewritten)
+
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 
-# Define your news sources
-sources = {
+# Define ESG-related news sources
+NEWS_SOURCES = {
     "CSR@天下": "https://csr.cw.com.tw/",
     "CSRone": "https://csrone.com/",
     "ETtoday ESG": "https://esg.ettoday.net/",
@@ -14,85 +16,83 @@ sources = {
     "中央社 健康環保": "https://www.cna.com.tw/list/ahel.aspx"
 }
 
-def fetch_html(url):
+def fetch_page_soup(url):
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         return BeautifulSoup(response.text, 'html.parser')
     except Exception as e:
-        st.warning(f"❌ Failed to fetch {url}: {e}")
+        st.warning(f"⚠️ 無法連線至 {url}：{e}")
         return None
 
-def parse_generic(soup, base_url, tag_selector, limit=5):
-    articles = []
-    seen = set()
-    for tag in soup.select(tag_selector):
-        title = tag.text.strip()
-        link = tag.get('href')
-        if not title or not link or title in seen:
+def extract_articles(soup, base_url, selector, max_articles=5):
+    articles, seen_titles = [], set()
+    for tag in soup.select(selector):
+        title = tag.get_text(strip=True)
+        href = tag.get('href')
+        if not title or not href or title in seen_titles:
             continue
-        seen.add(title)
-        if link.startswith('/'):
-            link = base_url.rstrip('/') + link
-        elif not link.startswith('http'):
+        seen_titles.add(title)
+        if href.startswith('/'):
+            href = base_url.rstrip('/') + href
+        elif not href.startswith('http'):
             continue
-        articles.append((title, link))
-        if len(articles) >= limit:
+        articles.append((title, href))
+        if len(articles) >= max_articles:
             break
     return articles
 
-def get_articles():
-    result = {}
-    for name, url in sources.items():
-        soup = fetch_html(url)
+def collect_all_news():
+    collected_news = {}
+    for name, url in NEWS_SOURCES.items():
+        soup = fetch_page_soup(url)
         if not soup:
-            result[name] = []
+            collected_news[name] = []
             continue
 
         if "cw.com.tw" in url:
-            articles = parse_generic(soup, url, 'div.article-content a')
+            selector = 'div.article-content a'
         elif "ettoday.net" in url:
-            articles = parse_generic(soup, url, 'div.piece h3 a')
+            selector = 'div.piece h3 a'
         elif "guardian" in url:
-            articles = parse_generic(soup, url, 'a.u-faux-block-link__overlay')
+            selector = 'a.u-faux-block-link__overlay'
         elif "cnn" in url:
-            articles = parse_generic(soup, url, 'h3.cd__headline a')
+            selector = 'h3.cd__headline a'
         elif "bbc" in url:
-            articles = parse_generic(soup, url, 'a.gs-c-promo-heading')
+            selector = 'a.gs-c-promo-heading'
         elif "cna.com.tw" in url:
-            articles = parse_generic(soup, url, 'div.listBox a')
+            selector = 'div.listBox a'
         elif "csrone" in url:
-            articles = parse_generic(soup, url, 'h5.card-title a')
+            selector = 'h5.card-title a'
         else:
-            articles = parse_generic(soup, url, 'a')
+            selector = 'a'
 
-        result[name] = articles
-    return result
+        collected_news[name] = extract_articles(soup, url, selector)
+    return collected_news
 
-def format_for_notion(articles_by_source):
-    date_str = datetime.today().strftime('%Y-%m-%d')
-    notion_md = f"## 🌱 ESG Weekly News Digest ({date_str})\n\n"
-
-    for source, articles in articles_by_source.items():
-        notion_md += f"### {source}\n"
+def generate_notion_markdown(news_dict):
+    today = datetime.today().strftime('%Y-%m-%d')
+    md = f"## \U0001F331 ESG Weekly News Digest ({today})\n\n"
+    for source, articles in news_dict.items():
+        md += f"### {source}\n"
         if not articles:
-            notion_md += "- 無法取得新聞資料\n"
-            continue
-        for title, link in articles:
-            notion_md += f"- [{title}]({link})\n"
-        notion_md += "\n"
+            md += "- 無法取得新聞資料\n"
+        else:
+            for title, link in articles:
+                md += f"- [{title}]({link})\n"
+        md += "\n"
+    return md
 
-    return notion_md
-
-# Streamlit Web UI
-st.title("📬 ESG 每週新聞快報工具")
+# Streamlit Web Interface
+st.set_page_config(page_title="ESG News Collector", layout="wide")
+st.title("\U0001F4EC ESG 每週新聞快報工具")
 
 if st.button("🔍 擷取本週 ESG 新聞"):
     with st.spinner("擷取中，請稍候..."):
-        news_data = get_articles()
-        notion_output = format_for_notion(news_data)
+        news_results = collect_all_news()
+        markdown_output = generate_notion_markdown(news_results)
         st.success("擷取完成！以下為可複製貼上的 Notion 格式：")
-        st.code(notion_output, language='markdown')
+        st.code(markdown_output, language='markdown')
 
 st.markdown("---")
-st.markdown("此工具由 Chris 專為 ESG 專業人士設計，點一下就幫你抓好每週的永續新聞！")
+st.markdown("由 Chris 設計的 ESG 新聞擷取工具，每週點一下就搞定資訊整理 🧠")
